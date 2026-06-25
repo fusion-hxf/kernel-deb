@@ -8,8 +8,12 @@ git clone https://github.com/fusion-hxf/linux-raphael.git --branch 7.1 --depth 1
 patch linux/scripts/package/builddeb < builddeb.patch
 
 cd linux
-git add .
-git commit -m "builddeb: Add Qcom SM8150 DTBs to boot partition"
+# 不再为这个补丁 commit：commit 会改变 HEAD，使内核版本里的 -g<hash> 偏离上游提交、无法追踪。
+# 改用 assume-unchanged 让 scripts/setlocalversion 的 dirty 检查（git status / git diff-index）
+# 忽略这个本地改动，从而内核版本 = ${KERNELVERSION}-sm8150-g<上游 HEAD 前 12 位>，
+# 与 linux-raphael@7.1 的最新提交一致（补丁内容仍在工作树中生效）。
+git update-index --assume-unchanged scripts/package/builddeb
+echo "内核版本将使用上游 HEAD 短 hash: -g$(git rev-parse HEAD | cut -c1-12)"
 
 # 生成内核配置
 cp ../raphael.config arch/arm64/configs/
