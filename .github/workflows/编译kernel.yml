@@ -1,98 +1,158 @@
-# 内核编译工作流 - 在 Ubuntu 24.04 ARM 上运行
 name: 内核编译
 
-# 手动触发，可指定内核版本
 on:
   workflow_dispatch:
     inputs:
       kernel_version:
-        description: '内核版本号 (如 7.1)'
-        required: true
+        description: '内核版本号 / Release 版本号'
+        required: false
         default: '7.1'
+        type: string
+      kernel_repo:
+        description: '内核源码仓库'
+        required: false
+        default: 'https://github.com/fusion-hxf/linux-raphael.git'
+        type: string
+      kernel_ref:
+        description: '内核源码分支/标签/提交；默认 7.1（音频 bring-up 节点）'
+        required: false
+        default: '7.1'
+        type: string
+      package_target:
+        description: '内核 deb 打包目标'
+        required: false
+        default: 'bindeb-pkg'
+        type: choice
+        options:
+          - bindeb-pkg
+          - deb-pkg
+      llvm_version:
+        description: 'LLVM/Clang 版本'
+        required: false
+        default: '22'
+        type: string
+      publish_release:
+        description: '是否发布/更新 GitHub Release'
+        required: false
+        default: true
+        type: boolean
+      release_tag:
+        description: 'Release tag；留空则使用 kernel-v<kernel_version>'
+        required: false
+        default: ''
+        type: string
 
-# 工作流配置
 jobs:
   build-kernel:
-    # 在 Ubuntu 24.04 ARM 上运行
     runs-on: ubuntu-24.04-arm
-    
-    # 设置权限，允许创建 Release
+
     permissions:
-      contents: write   # 允许创建 Release 和上传文件
-      packages: write   # 允许上传包（如果需要）
-    
-    # 定义环境变量
+      contents: write
+
     env:
-      BUILD_TIMESTAMP: ${{ format('{0}', github.run_id) }}-${{ github.run_number }}
-    
+      BUILD_TIMESTAMP: ${{ github.run_id }}-${{ github.run_number }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 5G
+
     steps:
-      # 检出代码
-      - name: 检出代码
-        uses: actions/checkout@v4
-      
-      # 安装编译依赖
+      - name: 检出 kernel-deb 仓库
+        uses: actions/checkout@v5
+
       - name: 安装编译依赖
         run: |
-          sudo apt update
-          sudo apt install -y build-essential gcc-aarch64-linux-gnu bc flex bison \
-          7zip kmod bash cpio binutils tar git wget dpkg libssl-dev \
-          libelf-dev python3 rsync debhelper-compat libdw-dev
-          
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 22
-      
-      # 设置 ccache 缓存
-      - name: 设置 ccache
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bc flex bison 7zip kmod bash cpio binutils tar git wget curl dpkg patch \
+            libssl-dev libelf-dev libdw-dev debhelper-compat python3 rsync dwarves ccache
+
+          if ! command -v "clang-${{ inputs.llvm_version }}" >/dev/null 2>&1; then
+            wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+            chmod +x llvm.sh
+            sudo ./llvm.sh "${{ inputs.llvm_version }}"
+          fi
+
+      - name: 恢复 ccache
         uses: actions/cache@v4
         with:
-          path: ~/.ccache
-          key: ${{ runner.os }}-ccache-kernel-${{ inputs.kernel_version }}
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ runner.os }}-ccache-kernel-${{ inputs.kernel_version }}-${{ inputs.kernel_ref }}-llvm${{ inputs.llvm_version }}-${{ hashFiles('raphael.config', 'builddeb.patch') }}
           restore-keys: |
+            ${{ runner.os }}-ccache-kernel-${{ inputs.kernel_version }}-
             ${{ runner.os }}-ccache-kernel-
-      
-      # 安装并配置 ccache
-      - name: 安装配置 ccache
+
+      - name: 配置 ccache
         run: |
-          sudo apt install -y ccache
-          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=5G" >> $GITHUB_ENV
-          echo "PATH=/usr/lib/ccache:$PATH" >> $GITHUB_ENV
-      
-      # 编译内核
-      - name: 编译内核
+          set -euo pipefail
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size="$CCACHE_MAXSIZE"
+          ccache --zero-stats || true
+
+      - name: 编译内核 deb 包
         env:
-          CCACHE_DIR: ${{ env.CCACHE_DIR }}
-          PATH: ${{ env.PATH }}
+          KERNEL_REPO: ${{ inputs.kernel_repo }}
+          KERNEL_REF: ${{ inputs.kernel_ref }}
+          KERNEL_PACKAGE_TARGET: ${{ inputs.package_target }}
+          LLVM_VERSION: ${{ inputs.llvm_version }}
+          USE_LOCAL_KERNEL: '0'
         run: |
-          # 导出 ccache 环境变量
-          export CCACHE_DIR="$HOME/.ccache"
+          set -euo pipefail
           export PATH="/usr/lib/ccache:$PATH"
-          
-          # 执行内核编译脚本
-          sudo bash raphael-kernel_build.sh ${{ inputs.kernel_version }}
-      
-      # 获取当前时间戳
-      - name: 获取构建时间
-        id: get-timestamp
+          bash raphael-kernel_build.sh "${{ inputs.kernel_version }}"
+
+      - name: 输出 ccache 统计
+        if: always()
+        run: ccache --show-stats || true
+
+      - name: 检查产物
         run: |
-          echo "timestamp=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
-      
-      # 列出编译产物
-      - name: 列出编译产物
-        run: ls -la *.deb || true
-      
-      # 创建 GitHub Release 并上传编译产物
-      - name: 创建 Release 并上传产物
+          set -euo pipefail
+          ls -lh *.deb kernel-build-info.env kernel-build-summary.md
+          for deb in *.deb; do
+            printf '%s -> %s %s %s\n' \
+              "$deb" \
+              "$(dpkg-deb -f "$deb" Package)" \
+              "$(dpkg-deb -f "$deb" Version)" \
+              "$(dpkg-deb -f "$deb" Architecture)"
+          done
+          cat kernel-build-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 准备发布元数据
+        id: meta
+        run: |
+          set -euo pipefail
+          . ./kernel-build-info.env
+
+          TAG="${{ inputs.release_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="kernel-v${{ inputs.kernel_version }}"
+          fi
+
+          {
+            echo "tag=$TAG"
+            echo "timestamp=$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
+            echo "source_commit=$KERNEL_SOURCE_COMMIT"
+            echo "source_subject=$KERNEL_SOURCE_SUBJECT"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "# xiaomi raphael linux 内核"
+            echo
+            echo "- 版本: ${{ inputs.kernel_version }}"
+            echo "- Release tag: $TAG"
+            echo "- 构建时间: $(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S')"
+            echo "- 构建 ID: ${{ env.BUILD_TIMESTAMP }}"
+            echo
+            cat kernel-build-summary.md
+          } > release-notes.md
+
+      - name: 发布 Release
+        if: ${{ inputs.publish_release }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: kernel-v${{ inputs.kernel_version }}
-          name: "xiaomi raphael linux内核 v${{ inputs.kernel_version }}"
-          body: |
-            xiaomi raphael linux内核
-            - 版本: ${{ inputs.kernel_version }}
-            - 构建时间: ${{ steps.get-timestamp.outputs.timestamp }}
-            - 构建 ID: ${{ env.BUILD_TIMESTAMP }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: "xiaomi raphael linux 内核 ${{ steps.meta.outputs.tag }}"
+          body_path: release-notes.md
           draft: false
           prerelease: false
           files: |
@@ -100,13 +160,17 @@ jobs:
             linux-headers-xiaomi-raphael.deb
             firmware-xiaomi-raphael.deb
             alsa-xiaomi-raphael.deb
+            kernel-build-info.env
+            kernel-build-summary.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      # 上传编译产物作为工作流制品
+
       - name: 上传内核包作为工作流制品
         uses: actions/upload-artifact@v4
         with:
           name: kernel-packages-v${{ inputs.kernel_version }}
           path: |
             *.deb
+            kernel-build-info.env
+            kernel-build-summary.md
+            release-notes.md
