@@ -162,7 +162,11 @@ validate_outputs() {
     [ -s "$deb" ] || die "产物为空或不存在: $deb"
   done
 
-  if ! dpkg-deb -c "$OUT_DIR/linux-image-xiaomi-raphael.deb" | grep -q 'sm8150-xiaomi-raphael.dtb'; then
+  # Do not use grep -q here: with pipefail it exits after the first match,
+  # closes the pipe early, and can make dpkg-deb/tar report a false write
+  # error (SIGPIPE).  Plain grep consumes the complete package listing.
+  if ! dpkg-deb -c "$OUT_DIR/linux-image-xiaomi-raphael.deb" \
+      | grep -F 'sm8150-xiaomi-raphael.dtb' >/dev/null; then
     die "linux-image deb 中未找到 sm8150-xiaomi-raphael.dtb"
   fi
 
