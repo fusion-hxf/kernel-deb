@@ -152,7 +152,7 @@ build_static_debs() {
 }
 
 validate_outputs() {
-  local deb
+  local deb dtb
 
   for deb in \
     "$OUT_DIR/linux-image-xiaomi-raphael.deb" \
@@ -165,10 +165,16 @@ validate_outputs() {
   # Do not use grep -q here: with pipefail it exits after the first match,
   # closes the pipe early, and can make dpkg-deb/tar report a false write
   # error (SIGPIPE).  Plain grep consumes the complete package listing.
-  if ! dpkg-deb -c "$OUT_DIR/linux-image-xiaomi-raphael.deb" \
-      | grep -F 'sm8150-xiaomi-raphael.dtb' >/dev/null; then
-    die "linux-image deb 中未找到 sm8150-xiaomi-raphael.dtb"
-  fi
+  for dtb in \
+    sm8150-xiaomi-raphael.dtb \
+    sm8150-xiaomi-raphael-audio-test.dtb \
+    sm8150-xiaomi-raphael-venus-test.dtb \
+    sm8150-xiaomi-raphael-bringup-test.dtb; do
+    if ! dpkg-deb -c "$OUT_DIR/linux-image-xiaomi-raphael.deb" \
+        | grep -F "/$dtb" >/dev/null; then
+      die "linux-image deb 中未找到 $dtb"
+    fi
+  done
 
   log "产物摘要:"
   for deb in "$OUT_DIR"/*.deb; do
