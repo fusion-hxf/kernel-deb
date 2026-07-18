@@ -4,9 +4,9 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 KERNEL_VERSION="${1:-${KERNEL_VERSION:-7.1}}"
-KERNEL_REPO="${KERNEL_REPO:-https://github.com/fusion-hxf/linux-raphael.git}"
-# 7.1 当前指向音频 bring-up 节点；视频相关尝试已确认无效，不作为默认来源。
-KERNEL_REF="${KERNEL_REF:-$KERNEL_VERSION}"
+KERNEL_REPO="${KERNEL_REPO:-https://github.com/fusion-hxf/linux.git}"
+# 包版本仍为 7.1；源码默认使用包含当前 Raphael bring-up 的 main。
+KERNEL_REF="${KERNEL_REF:-main}"
 KERNEL_SOURCE_DIR="${KERNEL_SOURCE_DIR:-}"
 USE_LOCAL_KERNEL="${USE_LOCAL_KERNEL:-auto}"
 WORK_DIR="${WORK_DIR:-$SCRIPT_DIR/.build-kernel}"
@@ -233,7 +233,7 @@ main() {
   need_file "$CONFIG_FILE"
 
   log "Raphael 内核 deb 构建开始"
-  log "默认内核 ref: $KERNEL_REF（当前应为音频 bring-up 节点）"
+  log "内核源码 ref: $KERNEL_REF"
 
   clone_kernel
   SOURCE_COMMIT="$(git -C "$SRC_DIR" rev-parse HEAD)"

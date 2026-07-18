@@ -1,17 +1,17 @@
 # Raphael Kernel Deb Builder
 
-本仓库负责把 `linux-raphael` 内核源码构建为 raphael 设备使用的 deb 包：
+本仓库负责把 `fusion-hxf/linux` 内核源码构建为 raphael 设备使用的 deb 包：
 
 - `linux-image-xiaomi-raphael.deb`
 - `linux-headers-xiaomi-raphael.deb`
 - `firmware-xiaomi-raphael.deb`
 - `alsa-xiaomi-raphael.deb`
 
-当前默认内核来源为 `7.1` 分支。该分支已确认停在音频 bring-up 节点；前一轮视频驱动相关尝试已判定无效，不作为默认构建来源。
+包版本默认仍为 `7.1`，源码默认使用 `main`。当前 `main` 包含音频 bring-up，以及受 `allow_iris1_probe` 安全门控的 Venus 诊断代码；默认模块加载不会探测 Iris1 硬件。
 
 ## 本地构建
 
-在聚合仓库中运行时，脚本会优先使用 `../linux`，再 checkout `KERNEL_REF`：
+在聚合仓库中运行时，脚本会优先使用 `../linux`，再 checkout `KERNEL_REF`（默认 `main`）：
 
 ```bash
 bash raphael-kernel_build.sh 7.1
@@ -20,7 +20,7 @@ bash raphael-kernel_build.sh 7.1
 强制从远端拉取：
 
 ```bash
-USE_LOCAL_KERNEL=0 KERNEL_REF=7.1 bash raphael-kernel_build.sh 7.1
+USE_LOCAL_KERNEL=0 KERNEL_REF=main bash raphael-kernel_build.sh 7.1
 ```
 
 保留临时源码目录用于排查：
@@ -33,8 +33,8 @@ KEEP_WORKDIR=1 bash raphael-kernel_build.sh 7.1
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
-| `KERNEL_REPO` | `https://github.com/fusion-hxf/linux-raphael.git` | 内核源码仓库 |
-| `KERNEL_REF` | 与版本号一致，如 `7.1` | 分支、标签或提交 |
+| `KERNEL_REPO` | `https://github.com/fusion-hxf/linux.git` | 内核源码仓库 |
+| `KERNEL_REF` | `main` | 分支、标签或提交 |
 | `KERNEL_SOURCE_DIR` | 空 | 显式指定本地内核源码路径 |
 | `USE_LOCAL_KERNEL` | `auto` | `auto` 会优先使用 `../linux`；设为 `0` 强制远端 |
 | `KERNEL_PACKAGE_TARGET` | `bindeb-pkg` | 可改为 `deb-pkg` |
@@ -58,4 +58,3 @@ KEEP_WORKDIR=1 bash raphael-kernel_build.sh 7.1
 - `release_tag`
 
 CI 中显式设置 `USE_LOCAL_KERNEL=0`，保证云端构建只使用 workflow 输入的源码仓库和 ref。
-
